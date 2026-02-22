@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import {
   View,
   Text,
@@ -32,7 +32,57 @@ export default function VerifyScreen() {
   const [state, setState] = useState<FlowState>("camera_floss");
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [result, setResult] = useState<VisionResult | null>(null);
+  const [timerSeconds, setTimerSeconds] = useState(120);
+  const [timerActive, setTimerActive] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timeOfDay = getTimeOfDay();
+
+  const TIMER_DURATION = 120; // 2 minutes in seconds
+
+  const formatTime = useCallback((seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, "0")}`;
+  }, []);
+
+  // Start timer when entering brush camera step
+  useEffect(() => {
+    if (state === "camera_brush") {
+      setTimerSeconds(TIMER_DURATION);
+      setTimerActive(true);
+    } else {
+      setTimerActive(false);
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+    }
+  }, [state]);
+
+  // Countdown logic
+  useEffect(() => {
+    if (timerActive && timerSeconds > 0) {
+      timerRef.current = setInterval(() => {
+        setTimerSeconds((prev) => {
+          if (prev <= 1) {
+            setTimerActive(false);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+  }, [timerActive, timerSeconds > 0]);
+
+  const timerComplete = state === "camera_brush" && timerSeconds === 0;
+  const timerProgress = 1 - timerSeconds / TIMER_DURATION;
 
   const takePhoto = async (step: VerificationStep) => {
     if (!cameraRef.current) return;
@@ -307,11 +357,16 @@ export default function VerifyScreen() {
 
   // Camera state
   const isFlossStep = state === "camera_floss";
+  const isBrushStep = state === "camera_brush";
   const stepLabel = isFlossStep ? "Floss" : "Brush";
   const stepNumber = isFlossStep ? "1" : "2";
   const instruction = isFlossStep
     ? "Take a selfie while flossing. Make sure your hands and teeth are visible!"
-    : "Take a selfie while brushing. Make sure your toothbrush and teeth are visible!";
+    : timerComplete
+      ? "Time's up! Take a selfie with your toothbrush visible."
+      : "Brush for 2 minutes. The camera is your mirror!";
+
+  const captureDisabled = isBrushStep && !timerComplete;
 
   return (
     <View style={{ flex: 1, backgroundColor: "#000000" }}>
@@ -355,7 +410,7 @@ export default function VerifyScreen() {
           </Text>
         </View>
 
-        {/* Bottom capture button */}
+        {/* Bottom section: timer + capture button */}
         <View
           style={{
             position: "absolute",
@@ -368,19 +423,65 @@ export default function VerifyScreen() {
             paddingTop: 20,
           }}
         >
+          {/* Timer display - brush step only */}
+          {isBrushStep && (
+            <View style={{ alignItems: "center", marginBottom: 16, width: "100%" }}>
+              <Text
+                style={{
+                  fontSize: 48,
+                  fontWeight: "800",
+                  color: timerComplete ? "#34D399" : "#FFFFFF",
+                  fontVariant: ["tabular-nums"],
+                }}
+              >
+                {formatTime(timerSeconds)}
+              </Text>
+
+              {/* Progress bar */}
+              <View
+                style={{
+                  width: "80%",
+                  height: 6,
+                  backgroundColor: "rgba(255,255,255,0.15)",
+                  borderRadius: 3,
+                  marginTop: 8,
+                  overflow: "hidden",
+                }}
+              >
+                <View
+                  style={{
+                    width: `${timerProgress * 100}%`,
+                    height: "100%",
+                    backgroundColor: timerComplete ? "#34D399" : "#A7F3D0",
+                    borderRadius: 3,
+                  }}
+                />
+              </View>
+            </View>
+          )}
+
+          {/* Capture button */}
           <TouchableOpacity
-            onPress={() =>
-              takePhoto(isFlossStep ? "floss" : "brush")
+            onPress={
+              captureDisabled
+                ? undefined
+                : () => takePhoto(isFlossStep ? "floss" : "brush")
             }
+            activeOpacity={captureDisabled ? 1 : 0.7}
             style={{
               width: 80,
               height: 80,
               borderRadius: 40,
-              backgroundColor: "#34D399",
+              backgroundColor: captureDisabled
+                ? "rgba(52, 211, 153, 0.3)"
+                : "#34D399",
               borderWidth: 4,
-              borderColor: "#FFFFFF",
+              borderColor: captureDisabled
+                ? "rgba(255,255,255,0.3)"
+                : "#FFFFFF",
               justifyContent: "center",
               alignItems: "center",
+              opacity: captureDisabled ? 0.4 : 1,
             }}
           >
             <Text style={{ fontSize: 32 }}>
@@ -389,13 +490,17 @@ export default function VerifyScreen() {
           </TouchableOpacity>
           <Text
             style={{
-              color: "#FFF",
+              color: timerComplete ? "#34D399" : "#FFF",
               fontSize: 14,
               marginTop: 8,
               fontWeight: "600",
             }}
           >
-            Tap to capture
+            {isBrushStep
+              ? timerComplete
+                ? "Tap to capture"
+                : "Keep brushing..."
+              : "Tap to capture"}
           </Text>
         </View>
       </CameraView>
