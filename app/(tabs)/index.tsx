@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useState, useCallback } from "react";
 import {
   View,
   Text,
@@ -13,8 +13,43 @@ import {
   getStreakInfo,
   checkAndUnlockAchievements,
 } from "../../src/services/storageService";
-import { DailyRecord, StreakInfo } from "../../src/types";
+import { DailyRecord, StreakInfo, RoutineStepType, TimeOfDay } from "../../src/types";
 import { getTimeOfDay } from "../../src/utils/dateUtils";
+import {
+  FULL_ROUTINE_STEPS,
+  STEP_TYPE_METADATA,
+} from "../../src/constants/routines";
+
+function getStepStatus(
+  record: DailyRecord | null,
+  timeSlot: TimeOfDay,
+  stepType: RoutineStepType
+): boolean {
+  if (!record) return false;
+
+  // Check V2 sessions first
+  if (record.sessions) {
+    const session = record.sessions.find((s) => s.timeSlot === timeSlot);
+    if (session) {
+      return session.steps.some(
+        (s) => s.stepType === stepType && s.verified
+      );
+    }
+  }
+
+  // Fall back to legacy fields
+  if (stepType === "brush") {
+    return timeSlot === "morning"
+      ? record.morningBrush?.verified || false
+      : record.eveningBrush?.verified || false;
+  }
+  if (stepType === "floss") {
+    return timeSlot === "morning"
+      ? record.morningFloss?.verified || false
+      : record.eveningFloss?.verified || false;
+  }
+  return false;
+}
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -45,13 +80,12 @@ export default function HomeScreen() {
     setRefreshing(false);
   };
 
-  const morningBrushDone = record?.morningBrush?.verified || false;
-  const morningFlossDone = record?.morningFloss?.verified || false;
-  const eveningBrushDone = record?.eveningBrush?.verified || false;
-  const eveningFlossDone = record?.eveningFloss?.verified || false;
-
-  const morningComplete = morningBrushDone && morningFlossDone;
-  const eveningComplete = eveningBrushDone && eveningFlossDone;
+  const morningComplete = FULL_ROUTINE_STEPS.every(
+    (step) => getStepStatus(record, "morning", step.type)
+  );
+  const eveningComplete = FULL_ROUTINE_STEPS.every(
+    (step) => getStepStatus(record, "evening", step.type)
+  );
   const allDone = morningComplete && eveningComplete;
 
   const currentSessionComplete =
@@ -120,19 +154,18 @@ export default function HomeScreen() {
         <View
           style={{
             flexDirection: "row",
-            justifyContent: "space-between",
+            flexWrap: "wrap",
+            gap: 8,
           }}
         >
-          <StatusPill
-            label="Floss"
-            done={morningFlossDone}
-            icon="🧵"
-          />
-          <StatusPill
-            label="Brush"
-            done={morningBrushDone}
-            icon="🪥"
-          />
+          {FULL_ROUTINE_STEPS.map((step) => (
+            <StatusPill
+              key={`morning_${step.type}`}
+              label={step.label}
+              done={getStepStatus(record, "morning", step.type)}
+              icon={STEP_TYPE_METADATA[step.type].icon}
+            />
+          ))}
         </View>
       </View>
 
@@ -158,19 +191,18 @@ export default function HomeScreen() {
         <View
           style={{
             flexDirection: "row",
-            justifyContent: "space-between",
+            flexWrap: "wrap",
+            gap: 8,
           }}
         >
-          <StatusPill
-            label="Floss"
-            done={eveningFlossDone}
-            icon="🧵"
-          />
-          <StatusPill
-            label="Brush"
-            done={eveningBrushDone}
-            icon="🪥"
-          />
+          {FULL_ROUTINE_STEPS.map((step) => (
+            <StatusPill
+              key={`evening_${step.type}`}
+              label={step.label}
+              done={getStepStatus(record, "evening", step.type)}
+              icon={STEP_TYPE_METADATA[step.type].icon}
+            />
+          ))}
         </View>
       </View>
 
@@ -233,11 +265,13 @@ export default function HomeScreen() {
       <View
         style={{
           flexDirection: "row",
+          flexWrap: "wrap",
           justifyContent: "space-around",
           marginTop: 24,
           paddingTop: 20,
           borderTopWidth: 1,
           borderTopColor: "#E2E8F0",
+          gap: 12,
         }}
       >
         <StatBox
@@ -245,12 +279,20 @@ export default function HomeScreen() {
           value={streakInfo?.totalDaysCompleted || 0}
         />
         <StatBox
-          label="Brush Sessions"
+          label="Brush"
           value={streakInfo?.totalBrushSessions || 0}
         />
         <StatBox
-          label="Floss Sessions"
+          label="Floss"
           value={streakInfo?.totalFlossSessions || 0}
+        />
+        <StatBox
+          label="Tongue"
+          value={streakInfo?.totalTongueScrapes || 0}
+        />
+        <StatBox
+          label="Mouthwash"
+          value={streakInfo?.totalMouthwashSessions || 0}
         />
       </View>
     </ScrollView>
@@ -273,10 +315,12 @@ function StatusPill({
         alignItems: "center",
         backgroundColor: done ? "#34D399" : "#CBD5E1",
         borderRadius: 20,
-        paddingHorizontal: 16,
+        paddingHorizontal: 14,
         paddingVertical: 8,
-        minWidth: 120,
+        minWidth: "45%",
         justifyContent: "center",
+        flexGrow: 1,
+        flexBasis: "45%",
       }}
     >
       <Text style={{ fontSize: 16, marginRight: 6 }}>{icon}</Text>
@@ -284,7 +328,7 @@ function StatusPill({
         style={{
           color: done ? "#FFFFFF" : "#475569",
           fontWeight: "600",
-          fontSize: 14,
+          fontSize: 13,
         }}
       >
         {label} {done ? "✓" : ""}
@@ -295,11 +339,11 @@ function StatusPill({
 
 function StatBox({ label, value }: { label: string; value: number }) {
   return (
-    <View style={{ alignItems: "center" }}>
+    <View style={{ alignItems: "center", minWidth: 60 }}>
       <Text style={{ fontSize: 24, fontWeight: "700", color: "#0F172A" }}>
         {value}
       </Text>
-      <Text style={{ fontSize: 12, color: "#94A3B8" }}>{label}</Text>
+      <Text style={{ fontSize: 11, color: "#94A3B8" }}>{label}</Text>
     </View>
   );
 }

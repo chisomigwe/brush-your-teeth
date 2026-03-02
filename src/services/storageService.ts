@@ -4,6 +4,9 @@ import {
   UserSettings,
   Achievement,
   StreakInfo,
+  SessionRecord,
+  SessionStepResult,
+  TimeOfDay,
 } from "../types";
 import { ACHIEVEMENTS, DEFAULT_SETTINGS } from "../constants/achievements";
 import { getToday, getDaysAgo } from "../utils/dateUtils";
@@ -68,11 +71,74 @@ export async function markVerified(
   return record;
 }
 
+// --- Session-based Recording (V2) ---
+
+export async function startSession(
+  timeSlot: TimeOfDay,
+  routineId: string
+): Promise<SessionRecord> {
+  const record = await getTodayRecord();
+  const session: SessionRecord = {
+    id: `${record.date}_${timeSlot}_${Date.now()}`,
+    date: record.date,
+    timeSlot,
+    routineId,
+    startedAt: new Date().toISOString(),
+    steps: [],
+    overallVerified: false,
+  };
+  if (!record.sessions) record.sessions = [];
+  record.sessions.push(session);
+  record.dataVersion = 2;
+  await saveDailyRecord(record);
+  return session;
+}
+
+export async function saveSessionStep(
+  sessionId: string,
+  stepResult: SessionStepResult
+): Promise<void> {
+  const record = await getTodayRecord();
+  const session = record.sessions?.find((s) => s.id === sessionId);
+  if (!session) return;
+  session.steps.push(stepResult);
+
+  // Also write to legacy fields for brush/floss (backward compat)
+  if (stepResult.stepType === "brush" || stepResult.stepType === "floss") {
+    const verification = {
+      verified: true,
+      timestamp: stepResult.completedAt,
+      confidence: stepResult.confidence,
+      photoUri: stepResult.photoUri,
+    };
+    const key =
+      session.timeSlot === "morning"
+        ? stepResult.stepType === "brush"
+          ? "morningBrush"
+          : "morningFloss"
+        : stepResult.stepType === "brush"
+          ? "eveningBrush"
+          : "eveningFloss";
+    (record as any)[key] = verification;
+  }
+
+  await saveDailyRecord(record);
+}
+
+export async function completeSession(sessionId: string): Promise<void> {
+  const record = await getTodayRecord();
+  const session = record.sessions?.find((s) => s.id === sessionId);
+  if (!session) return;
+  session.completedAt = new Date().toISOString();
+  session.overallVerified = session.steps.every((s) => s.verified);
+  await saveDailyRecord(record);
+}
+
 // --- Settings ---
 
 export async function getSettings(): Promise<UserSettings> {
   const data = await AsyncStorage.getItem(KEYS.SETTINGS);
-  return data ? JSON.parse(data) : DEFAULT_SETTINGS;
+  return data ? { ...DEFAULT_SETTINGS, ...JSON.parse(data) } : DEFAULT_SETTINGS;
 }
 
 export async function saveSettings(settings: UserSettings): Promise<void> {
@@ -83,7 +149,6 @@ export async function saveSettings(settings: UserSettings): Promise<void> {
 
 export async function getStreakInfo(): Promise<StreakInfo> {
   const records = await getAllRecords();
-  const dates = Object.keys(records).sort().reverse();
 
   let currentStreak = 0;
   let longestStreak = 0;
@@ -91,6 +156,9 @@ export async function getStreakInfo(): Promise<StreakInfo> {
   let totalDaysCompleted = 0;
   let totalBrushSessions = 0;
   let totalFlossSessions = 0;
+  let totalTongueScrapes = 0;
+  let totalMouthwashSessions = 0;
+  let totalCompleteSessions = 0;
 
   // Calculate current streak
   for (let i = 0; i < 366; i++) {
@@ -107,6 +175,19 @@ export async function getStreakInfo(): Promise<StreakInfo> {
       if (hasEveningBrush) totalBrushSessions++;
       if (hasMorningFloss) totalFlossSessions++;
       if (hasEveningFloss) totalFlossSessions++;
+
+      // Count V2 session step types
+      if (record.sessions) {
+        for (const session of record.sessions) {
+          if (session.overallVerified) totalCompleteSessions++;
+          for (const step of session.steps) {
+            if (step.verified) {
+              if (step.stepType === "tongue_scrape") totalTongueScrapes++;
+              if (step.stepType === "mouthwash") totalMouthwashSessions++;
+            }
+          }
+        }
+      }
 
       const dayComplete =
         (hasMorningBrush || hasEveningBrush) &&
@@ -154,6 +235,9 @@ export async function getStreakInfo(): Promise<StreakInfo> {
     totalDaysCompleted,
     totalBrushSessions,
     totalFlossSessions,
+    totalTongueScrapes,
+    totalMouthwashSessions,
+    totalCompleteSessions,
   };
 }
 
@@ -186,6 +270,15 @@ export async function checkAndUnlockAchievements(): Promise<Achievement[]> {
         break;
       case "total_days":
         qualifies = streakInfo.totalDaysCompleted >= achievement.requirement;
+        break;
+      case "total_tongue_scrape":
+        qualifies = streakInfo.totalTongueScrapes >= achievement.requirement;
+        break;
+      case "total_mouthwash":
+        qualifies = streakInfo.totalMouthwashSessions >= achievement.requirement;
+        break;
+      case "total_sessions":
+        qualifies = streakInfo.totalCompleteSessions >= achievement.requirement;
         break;
     }
 

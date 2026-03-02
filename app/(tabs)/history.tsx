@@ -2,8 +2,43 @@ import { useCallback, useState } from "react";
 import { View, Text, ScrollView } from "react-native";
 import { useFocusEffect } from "expo-router";
 import { getAllRecords } from "../../src/services/storageService";
-import { DailyRecord } from "../../src/types";
+import { DailyRecord, RoutineStepType, TimeOfDay } from "../../src/types";
 import { getLast30Days, formatDate, getToday } from "../../src/utils/dateUtils";
+import {
+  FULL_ROUTINE_STEPS,
+  STEP_TYPE_METADATA,
+} from "../../src/constants/routines";
+
+function getStepStatus(
+  record: DailyRecord | null,
+  timeSlot: TimeOfDay,
+  stepType: RoutineStepType
+): boolean {
+  if (!record) return false;
+
+  // Check V2 sessions first
+  if (record.sessions) {
+    const session = record.sessions.find((s) => s.timeSlot === timeSlot);
+    if (session) {
+      return session.steps.some(
+        (s) => s.stepType === stepType && s.verified
+      );
+    }
+  }
+
+  // Fall back to legacy fields
+  if (stepType === "brush") {
+    return timeSlot === "morning"
+      ? record.morningBrush?.verified || false
+      : record.eveningBrush?.verified || false;
+  }
+  if (stepType === "floss") {
+    return timeSlot === "morning"
+      ? record.morningFloss?.verified || false
+      : record.eveningFloss?.verified || false;
+  }
+  return false;
+}
 
 export default function HistoryScreen() {
   const [records, setRecords] = useState<Record<string, DailyRecord>>({});
@@ -154,7 +189,7 @@ export default function HistoryScreen() {
         .slice(-7)
         .reverse()
         .map((date) => {
-          const r = records[date];
+          const r = records[date] || null;
           return (
             <View
               key={date}
@@ -179,16 +214,8 @@ export default function HistoryScreen() {
                 {date === today ? "Today" : formatDate(date)}
               </Text>
               <View style={{ flexDirection: "row", gap: 8 }}>
-                <MiniStatus
-                  label="AM"
-                  brush={r?.morningBrush?.verified}
-                  floss={r?.morningFloss?.verified}
-                />
-                <MiniStatus
-                  label="PM"
-                  brush={r?.eveningBrush?.verified}
-                  floss={r?.eveningFloss?.verified}
-                />
+                <MiniStatus label="AM" record={r} timeSlot="morning" />
+                <MiniStatus label="PM" record={r} timeSlot="evening" />
               </View>
             </View>
           );
@@ -215,12 +242,12 @@ function LegendDot({ color, label }: { color: string; label: string }) {
 
 function MiniStatus({
   label,
-  brush,
-  floss,
+  record,
+  timeSlot,
 }: {
   label: string;
-  brush?: boolean;
-  floss?: boolean;
+  record: DailyRecord | null;
+  timeSlot: TimeOfDay;
 }) {
   return (
     <View style={{ alignItems: "center" }}>
@@ -228,8 +255,13 @@ function MiniStatus({
         {label}
       </Text>
       <View style={{ flexDirection: "row", gap: 2 }}>
-        <Text style={{ fontSize: 12 }}>{brush ? "🪥" : "⬜"}</Text>
-        <Text style={{ fontSize: 12 }}>{floss ? "🧵" : "⬜"}</Text>
+        {FULL_ROUTINE_STEPS.map((step) => (
+          <Text key={step.type} style={{ fontSize: 12 }}>
+            {getStepStatus(record, timeSlot, step.type)
+              ? STEP_TYPE_METADATA[step.type].icon
+              : "⬜"}
+          </Text>
+        ))}
       </View>
     </View>
   );

@@ -89,6 +89,30 @@ export const ACHIEVEMENTS: Achievement[] = [
     requirement: 100,
     type: "total_floss",
   },
+  {
+    id: "tongue_30",
+    title: "Tongue Tamer",
+    description: "30 tongue scrape sessions",
+    icon: "👅",
+    requirement: 30,
+    type: "total_tongue_scrape",
+  },
+  {
+    id: "mouthwash_30",
+    title: "Fresh Breath Master",
+    description: "30 mouthwash sessions",
+    icon: "💧",
+    requirement: 30,
+    type: "total_mouthwash",
+  },
+  {
+    id: "sessions_100",
+    title: "Routine Regular",
+    description: "100 complete sessions",
+    icon: "🎯",
+    requirement: 100,
+    type: "total_sessions",
+  },
 ];
 
 export const DEFAULT_SETTINGS = {
@@ -96,4 +120,9 @@ export const DEFAULT_SETTINGS = {
   eveningTime: "21:00",
   notificationsEnabled: true,
   reminderIntervalMinutes: 15,
+  useSameRoutine: true,
+  morningRoutineId: null as string | null,
+  eveningRoutineId: null as string | null,
+  aiCoachingEnabled: false,
+  dataVersion: 1,
 };
